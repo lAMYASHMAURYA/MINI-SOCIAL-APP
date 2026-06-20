@@ -1,17 +1,15 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { DBState, User, Post, Comment } from "./src/types";
 import { GoogleGenAI, Type } from "@google/genai";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { createServer } from "http";
+import { WebSocketServer, WebSocket } from "ws";
 
 const app = express();
 const PORT = 3000;
-const DB_FILE = path.join(__dirname, "db.json");
+const DB_FILE = path.join(process.cwd(), "db.json");
 
 app.use(express.json());
 
@@ -153,6 +151,9 @@ function writeDB(state: DBState) {
 
 // Load DB local state
 dbState = readDB();
+if (!dbState.messages) {
+  dbState.messages = [];
+}
 
 // Active fake session to simulate user logins & switching
 let currentActiveUserId = "yash_m";
@@ -485,9 +486,82 @@ app.post("/api/posts/:id/comment", (req, res) => {
   res.status(210).json(newComment);
 });
 
+// --- MESSAGING & REALTIME CHAT SYSTEM ---
+
+// Mapping of connected WebSocket clients to their current authenticated username handles
+const wsClients = new Map<WebSocket, string>();
+
+// Broadcast a message to all matching clients
+function broadcastMessage(message: any) {
+  const payload = JSON.stringify({ type: "message", data: message });
+  wsClients.forEach((clientUserId, clientWs) => {
+    if (clientWs.readyState === WebSocket.OPEN) {
+      if (message.recipientId === "global") {
+        clientWs.send(payload);
+      } else {
+        // Direct message: only send to sender and target recipient
+        if (clientUserId === message.recipientId || clientUserId === message.senderId) {
+          clientWs.send(payload);
+        }
+      }
+    }
+  });
+}
+
+// Get messages history
+app.get("/api/messages", (req, res) => {
+  const { chatWith } = req.query;
+  const messages = dbState.messages || [];
+
+  if (!chatWith) {
+    return res.json(messages);
+  }
+
+  if (chatWith === "global") {
+    const globalMessages = messages.filter(m => m.recipientId === "global");
+    return res.json(globalMessages);
+  }
+
+  // Filter messages between current simulator active user and targeted recipient
+  const directMessages = messages.filter(m => 
+    (m.senderId === currentActiveUserId && m.recipientId === chatWith) ||
+    (m.senderId === chatWith && m.recipientId === currentActiveUserId)
+  );
+  return res.json(directMessages);
+});
+
+// Post/Send message (REST API endpoint for guaranteed fallback + triggers active broadcast)
+app.post("/api/messages", (req, res) => {
+  const { recipientId, content } = req.body;
+  
+  if (!content || !content.trim()) {
+    return res.status(400).json({ error: "Message content cannot be empty." });
+  }
+
+  const newMessage = {
+    id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+    senderId: currentActiveUserId,
+    recipientId: recipientId || "global",
+    content: content.trim(),
+    createdAt: new Date().toISOString()
+  };
+
+  if (!dbState.messages) {
+    dbState.messages = [];
+  }
+  dbState.messages.push(newMessage);
+  writeDB(dbState);
+
+  // Broadcast to WebSockets
+  broadcastMessage(newMessage);
+
+  return res.status(210).json(newMessage);
+});
+
 // Reset Database endpoint for debugging and interactive refresh
 app.post("/api/admin/reset", (req, res) => {
   dbState = getInitialDB();
+  dbState.messages = [];
   writeDB(dbState);
   currentActiveUserId = "yash_m";
   res.json({ message: "Database reset to initial seed data successfully." });
@@ -495,6 +569,59 @@ app.post("/api/admin/reset", (req, res) => {
 
 // --- INGRESS & VITE DEV SERVER MIDDLEWARE HANDLERS ---
 async function startServer() {
+  const httpSever = createServer(app);
+
+  // Integrate WebSocket Server onto high-performance HTTP portInlet pool
+  const wss = new WebSocketServer({ server: httpSever });
+
+  wss.on("connection", (ws) => {
+    console.log("[WebSocket] Client connected to live sync gateway");
+
+    ws.on("message", (raw) => {
+      try {
+        const payload = JSON.parse(raw.toString());
+        if (payload.type === "join") {
+          const { userId } = payload.data;
+          if (userId) {
+            wsClients.set(ws, userId);
+            console.log(`[WebSocket] Associated socket with account handle: @${userId}`);
+            
+            // Confirm registration
+            ws.send(JSON.stringify({ type: "joined", data: { userId } }));
+          }
+        } else if (payload.type === "message") {
+          const { recipientId, content, senderId } = payload.data;
+          const author = senderId || currentActiveUserId;
+          if (content && content.trim()) {
+            const newMessage = {
+              id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+              senderId: author,
+              recipientId: recipientId || "global",
+              content: content.trim(),
+              createdAt: new Date().toISOString()
+            };
+
+            if (!dbState.messages) {
+              dbState.messages = [];
+            }
+            dbState.messages.push(newMessage);
+            writeDB(dbState);
+
+            broadcastMessage(newMessage);
+          }
+        }
+      } catch (err) {
+        console.error("[WebSocket] Failed parsing transaction frames:", err);
+      }
+    });
+
+    ws.on("close", () => {
+      const associatedId = wsClients.get(ws);
+      wsClients.delete(ws);
+      console.log(`[WebSocket] Connection terminated for handle: @${associatedId || "anonymous"}`);
+    });
+  });
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -509,8 +636,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Express] Mini Social Backend running securely on http://localhost:${PORT}`);
+  httpSever.listen(PORT, "0.0.0.0", () => {
+    console.log(`[Express + WS Joint Gateway] Server listening on http://localhost:${PORT}`);
   });
 }
 

@@ -29,6 +29,7 @@ import PostCard from "./components/PostCard";
 import UserProfileModal from "./components/UserProfileModal";
 import CreateProfileModal from "./components/CreateProfileModal";
 import CreatePostCard from "./components/CreatePostCard";
+import MessengerDrawer from "./components/MessengerDrawer";
 
 import StoryBubbleTray from "./components/StoryBubbleTray";
 import StoryViewerModal from "./components/StoryViewerModal";
@@ -970,11 +971,22 @@ export default function App() {
         />
       )}
 
+      {/* LIVE MESSENGER WIDGET DRAWER */}
+      {currentUser && (
+        <MessengerDrawer
+          currentUser={currentUser}
+          users={users}
+          usersMap={usersMap}
+        />
+      )}
+
       {/* MODAL: Profile signup form */}
       {showCreateProfileModal && (
         <CreateProfileModal
           onClose={() => setShowCreateProfileModal(false)}
           onSubmit={handleCreateProfileSubmit}
+          users={users}
+          onSwitchUser={handleSwitchSimulatedUser}
         />
       )}
     </div>

@@ -40,9 +40,18 @@ export interface Story {
   createdAt: string;
 }
 
+export interface Message {
+  id: string;
+  senderId: string;
+  recipientId: string; // "global" for public chat room, or specific username
+  content: string;
+  createdAt: string;
+}
+
 export interface DBState {
   users: Record<string, User>;
   posts: Post[];
   stories: Story[];
+  messages?: Message[];
 }
 

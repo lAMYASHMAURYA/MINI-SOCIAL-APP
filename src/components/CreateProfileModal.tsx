@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X, UserPlus, Sparkles, AlertCircle } from "lucide-react";
+import { X, UserPlus, Sparkles, AlertCircle, LogIn, CheckCircle } from "lucide-react";
 import { User } from "../types";
 
 interface CreateProfileModalProps {
@@ -12,6 +12,8 @@ interface CreateProfileModalProps {
     googleEmail?: string;
     isGoogleUser?: boolean;
   }) => Promise<User | null>;
+  users?: User[];
+  onSwitchUser?: (userId: string) => Promise<void>;
 }
 
 // Preset modern avatar vectors for fun selection
@@ -42,7 +44,10 @@ const GOOGLE_ACCOUNTS = [
   }
 ];
 
-export default function CreateProfileModal({ onClose, onSubmit }: CreateProfileModalProps) {
+export default function CreateProfileModal({ onClose, onSubmit, users = [], onSwitchUser }: CreateProfileModalProps) {
+  const [activeTab, setActiveTab] = useState<"register" | "signin">("register");
+  const [loginUsername, setLoginUsername] = useState("");
+
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
@@ -77,6 +82,24 @@ export default function CreateProfileModal({ onClose, onSubmit }: CreateProfileM
     setIsLoading(true);
     setError("");
     const defaultUsername = acc.email.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "");
+    
+    // Check if user already exists
+    const existing = users.find(u => u.id === defaultUsername);
+    if (existing) {
+      // Switch automatically if already exists!
+      try {
+        if (onSwitchUser) {
+          await onSwitchUser(defaultUsername);
+          onClose();
+          return;
+        }
+      } catch (err: any) {
+        setError(err?.message || "Failed to log into existing Google profile.");
+        setIsLoading(false);
+        return;
+      }
+    }
+
     try {
       const resUser = await onSubmit({
         username: defaultUsername,
@@ -106,6 +129,23 @@ export default function CreateProfileModal({ onClose, onSubmit }: CreateProfileM
     setIsLoading(true);
     setError("");
     const defaultUsername = customGoogleEmail.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "");
+    
+    // Check if user already exists
+    const existing = users.find(u => u.id === defaultUsername);
+    if (existing) {
+      try {
+        if (onSwitchUser) {
+          await onSwitchUser(defaultUsername);
+          onClose();
+          return;
+        }
+      } catch (err: any) {
+        setError(err?.message || "Failed to switch user.");
+        setIsLoading(false);
+        return;
+      }
+    }
+
     try {
       const resUser = await onSubmit({
         username: defaultUsername,
@@ -133,6 +173,34 @@ export default function CreateProfileModal({ onClose, onSubmit }: CreateProfileM
     setDisplayName("");
     setBio("");
     setAvatarUrl(AVATAR_PRESETS[0]);
+  };
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    const cleanHandle = loginUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+    if (!cleanHandle) {
+      setError("Please enter a valid handle name.");
+      return;
+    }
+
+    const matched = users.find(u => u.id === cleanHandle);
+    if (!matched) {
+      setError(`Profile handle @${cleanHandle} does not exist. Check spelling or Register below.`);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      if (onSwitchUser) {
+        await onSwitchUser(cleanHandle);
+        onClose();
+      }
+    } catch (err: any) {
+      setError(err?.message || "Failed to sign in with this account.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
@@ -169,7 +237,15 @@ export default function CreateProfileModal({ onClose, onSubmit }: CreateProfileM
         onClose();
       }
     } catch (err: any) {
-      setError(err?.message || "An error occurred while creating your profile.");
+      // Suggest login if already registered
+      const msg = err?.message || "An error occurred while creating your profile.";
+      if (msg.toLowerCase().includes("taken") || msg.toLowerCase().includes("already")) {
+        setError(`${msg} -> Do you want to sign in instead?`);
+        setLoginUsername(username.trim().toLowerCase());
+        setActiveTab("signin");
+      } else {
+        setError(msg);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -180,84 +256,185 @@ export default function CreateProfileModal({ onClose, onSubmit }: CreateProfileM
       <div className="bg-white rounded-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col shadow-2xl border border-[#DBDBDB] animate-in fade-in zoom-in-95 duration-200">
         
         {/* Modal Header */}
-        <div className="p-6 border-b border-[#DBDBDB] flex items-center justify-between bg-white">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-lg bg-[#FAFAFA] border border-[#DBDBDB] text-zinc-900">
-              <UserPlus className="w-5 h-5" />
+        <div className="p-5 border-b border-[#DBDBDB] bg-white flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-lg bg-[#FAFAFA] border border-[#DBDBDB] text-zinc-900">
+                <UserPlus className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-[#262626] leading-tight font-sans">User Access Center</h3>
+                <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wide">Register Account or Sign In</p>
+              </div>
             </div>
-            <div>
-              <h3 className="text-base font-bold text-[#262626] leading-tight font-sans">Create User Profile</h3>
-              <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wide">Register Account</p>
-            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-650 p-1.5 rounded-full hover:bg-[#FAFAFA] transition-colors cursor-pointer border border-transparent hover:border-[#DBDBDB]"
+              id="close-create-profile-modal"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-650 p-1.5 rounded-full hover:bg-[#FAFAFA] transition-colors cursor-pointer border border-transparent hover:border-[#DBDBDB]"
-            id="close-create-profile-modal"
-          >
-            <X className="w-4 h-4" />
-          </button>
+
+          {/* Elegant active tab triggers */}
+          <div className="flex bg-[#FAFAFA] p-1 rounded-lg border border-[#EBEBEB]">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("register");
+                setError("");
+              }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "register" ? "bg-white text-zinc-900 shadow-xs border border-gray-100" : "text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Create Account</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("signin");
+                setError("");
+              }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                activeTab === "signin" ? "bg-white text-zinc-900 shadow-xs border border-gray-100" : "text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Sign In</span>
+            </button>
+          </div>
         </div>
 
-        {/* Form body */}
-        <form onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 bg-white">
-          
-          {/* Google Sign-In Integration */}
-          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
-            <h4 className="text-[10px] uppercase font-bold tracking-wider text-gray-500">Fast Registration</h4>
-            {isGoogleUser ? (
-              <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                  <div className="text-left">
-                    <p className="text-xs font-bold text-green-800">Connected with Google</p>
-                    <p className="text-[10px] text-green-600 font-mono text-xs">{googleEmail}</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={unlinkGoogleAccount}
-                  className="text-[10px] font-bold text-red-500 hover:text-red-700 hover:underline cursor-pointer"
-                >
-                  Disconnect
-                </button>
+        {activeTab === "signin" ? (
+          /* Sign In Form */
+          <form onSubmit={handleLoginSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 bg-white" id="signin-tab-content">
+            {error && (
+              <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 font-medium">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                <span>{error}</span>
               </div>
-            ) : (
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowGooglePopup(true)}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-white border border-[#DBDBDB] hover:bg-gray-50 text-[13px] font-bold text-zinc-800 rounded-lg shadow-xs cursor-pointer transition"
-                  id="google-signin-btn"
-                >
-                  <svg className="w-4 h-4" viewBox="0 0 24 24">
-                    <path
-                      fill="#EA4335"
-                      d="M12 5.04c1.74 0 3.12.6 3.81 1.25l2.84-2.84C16.92 1.9 14.65 1 12 1 7.24 1 3.2 4.04 1.62 8.38l3.41 2.65C5.87 7.78 8.69 5.04 12 5.04z"
-                    />
-                    <path
-                      fill="#4285F4"
-                      d="M23.49 12.27c0-.81-.07-1.59-.2-2.36H12v4.47h6.47c-.28 1.47-1.11 2.71-2.35 3.55l3.66 2.84c2.14-1.97 3.38-4.88 3.38-8.5z"
-                    />
-                    <path
-                      fill="#FBBC05"
-                      d="M5.03 14.77a7.2 7.2 0 0 1-.38-2.3c0-.82.14-1.62.38-2.3L1.62 7.52C.58 9.61 0 11.91 0 14.33c0 2.42.58 4.72 1.62 6.81l3.41-2.37z"
-                    />
-                    <path
-                      fill="#34A853"
-                      d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.66-2.84c-1.01.68-2.3 1.09-3.73 1.09-3.31 0-6.13-2.22-7.13-5.22L1.62 15.5C3.2 19.84 7.24 23 12 23s.01 0 .01 0z"
-                    />
-                  </svg>
-                  <span>Continue with Google</span>
-                </button>
-                <div className="flex items-center gap-2 my-2">
-                  <div className="flex-1 h-[1px] bg-gray-200" />
-                  <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">or sign up manually</span>
-                  <div className="flex-1 h-[1px] bg-gray-200" />
+            )}
+
+            <div className="space-y-1.5 text-left">
+              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">Your account username</label>
+              <div className="relative flex items-center">
+                <span className="absolute left-3 text-gray-450 text-sm font-semibold font-mono">@</span>
+                <input
+                  type="text"
+                  required
+                  placeholder="yash_m"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ""))}
+                  className="w-full text-sm pl-7 pr-3 py-2 bg-transparent border border-[#DBDBDB] rounded-lg focus:outline-none focus:border-[#0095F6] transition font-mono font-medium"
+                  id="signin-username-input"
+                />
+              </div>
+              <p className="text-[9px] text-gray-400 font-medium">Type your existing lowercase username with underscores.</p>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-zinc-900 hover:bg-zinc-850 disabled:opacity-50 text-white font-bold text-sm cursor-pointer transition"
+              id="signin-submit-btn"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>{isLoading ? "Signing In..." : "Authenticate Session"}</span>
+            </button>
+
+            {/* Quick select registry */}
+            {users.length > 0 && (
+              <div className="pt-2 border-t border-gray-100">
+                <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider block mb-2 text-left">Select an active profile:</span>
+                <div className="grid grid-cols-1 gap-2 max-h-[160px] overflow-y-auto pr-1">
+                  {users.map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => {
+                        setLoginUsername(u.id);
+                        setError("");
+                      }}
+                      className="flex items-center justify-between p-2 rounded-lg border border-gray-100 hover:border-zinc-350 hover:bg-zinc-50 transition text-left cursor-pointer text-xs"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <img src={u.avatarUrl} alt={u.displayName} className="w-6.5 h-6.5 rounded-full object-cover border border-[#DBDBDB]" />
+                        <div className="min-w-0">
+                          <p className="truncate font-bold text-zinc-800">{u.displayName}</p>
+                          <p className="text-[9px] text-gray-400 font-mono">@{u.id}</p>
+                        </div>
+                      </div>
+                      {loginUsername === u.id && (
+                        <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+                      )}
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
-          </div>
+          </form>
+        ) : (
+          /* Registration Form */
+          <form onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-6 space-y-4 bg-white" id="register-tab-content">
+            
+            {/* Google Sign-In Integration */}
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-3">
+              <h4 className="text-[10px] uppercase font-bold tracking-wider text-gray-500">Fast Registration</h4>
+              {isGoogleUser ? (
+                <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                    <div className="text-left">
+                      <p className="text-xs font-bold text-green-800">Connected with Google</p>
+                      <p className="text-[10px] text-green-600 font-mono text-xs">{googleEmail}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={unlinkGoogleAccount}
+                    className="text-[10px] font-bold text-red-500 hover:text-red-700 hover:underline cursor-pointer"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowGooglePopup(true)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-white border border-[#DBDBDB] hover:bg-gray-50 text-[13px] font-bold text-zinc-800 rounded-lg shadow-xs cursor-pointer transition"
+                    id="google-signin-btn"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24">
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.04c1.74 0 3.12.6 3.81 1.25l2.84-2.84C16.92 1.9 14.65 1 12 1 7.24 1 3.2 4.04 1.62 8.38l3.41 2.65C5.87 7.78 8.69 5.04 12 5.04z"
+                      />
+                      <path
+                        fill="#4285F4"
+                        d="M23.49 12.27c0-.81-.07-1.59-.2-2.36H12v4.47h6.47c-.28 1.47-1.11 2.71-2.35 3.55l3.66 2.84c2.14-1.97 3.38-4.88 3.38-8.5z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.03 14.77a7.2 7.2 0 0 1-.38-2.3c0-.82.14-1.62.38-2.3L1.62 7.52C.58 9.61 0 11.91 0 14.33c0 2.42.58 4.72 1.62 6.81l3.41-2.37z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c3.24 0 5.97-1.07 7.96-2.91l-3.66-2.84c-1.01.68-2.3 1.09-3.73 1.09-3.31 0-6.13-2.22-7.13-5.22L1.62 15.5C3.2 19.84 7.24 23 12 23s.01 0 .01 0z"
+                      />
+                    </svg>
+                    <span>Continue with Google</span>
+                  </button>
+                  <div className="flex items-center gap-2 my-2">
+                    <div className="flex-1 h-[1px] bg-gray-200" />
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">or sign up manually</span>
+                    <div className="flex-1 h-[1px] bg-gray-200" />
+                  </div>
+                </div>
+              )}
+            </div>
 
           {error && (
             <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 font-medium" id="create-profile-error">
@@ -366,6 +543,7 @@ export default function CreateProfileModal({ onClose, onSubmit }: CreateProfileM
             <span>{isLoading ? "Creating Profile..." : "Create and Sign In"}</span>
           </button>
         </form>
+        )}
       </div>
 
       {/* Simulated Google Consent popup */}

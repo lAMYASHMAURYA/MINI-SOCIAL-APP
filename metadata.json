@@ -1,0 +1,6 @@
+{
+  "name": "Mini Social Media App",
+  "description": "A full-stack mini social media app featuring user profiles, posts, comments, live-like toggles, user profile creation, and follow system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,10 +1,16 @@
 import React, { useState } from "react";
-import { Send, Image as ImageIcon, Sparkles, AlertCircle } from "lucide-react";
+import { Send, Image as ImageIcon, Sparkles, AlertCircle, Laptop, Clock, Filter } from "lucide-react";
 import { User, Post } from "../types";
 
 interface CreatePostCardProps {
   currentUser: User | null;
-  onPostCreated: (content: string, imageUrl?: string) => Promise<boolean>;
+  onPostCreated: (
+    content: string, 
+    imageUrl?: string,
+    postType?: "instagram" | "snapchat" | "telegram",
+    filterStyle?: string,
+    expireHours?: number
+  ) => Promise<boolean>;
 }
 
 const ATTACHMENT_SUGGESTIONS = [
@@ -14,12 +20,25 @@ const ATTACHMENT_SUGGESTIONS = [
   { label: "Design", url: "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=650" }
 ];
 
+const SNAP_LENSES = [
+  { id: "none", label: "No Filter 🚫", style: "" },
+  { id: "sepia", label: "Sepia Glow 🍂", style: "sepia saturate-150 contrast-105" },
+  { id: "grayscale", label: "Noir Grayscale 🎬", style: "grayscale contrast-125" },
+  { id: "neon", label: "Cyber Neon 👾", style: "saturate-200 contrast-110 hue-rotate-60" },
+  { id: "blue", label: "Prismatic Cold ❄️", style: "hue-rotate-180 brightness-105 saturate-125" }
+];
+
 export default function CreatePostCard({ currentUser, onPostCreated }: CreatePostCardProps) {
   const [content, setContent] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [showImageInput, setShowImageInput] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  // Trio Mode state values
+  const [postType, setPostType] = useState<"instagram" | "snapchat" | "telegram">("instagram");
+  const [filterStyle, setFilterStyle] = useState("none");
+  const [expireHours, setExpireHours] = useState(24);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,11 +51,22 @@ export default function CreatePostCard({ currentUser, onPostCreated }: CreatePos
 
     setIsSubmitting(true);
     try {
-      const success = await onPostCreated(content.trim(), imageUrl.trim() || undefined);
+      const activeFilter = postType === "snapchat" ? filterStyle : "none";
+      const actualExpire = postType === "snapchat" ? expireHours : undefined;
+
+      const success = await onPostCreated(
+        content.trim(), 
+        imageUrl.trim() || undefined,
+        postType,
+        activeFilter,
+        actualExpire
+      );
       if (success) {
         setContent("");
         setImageUrl("");
         setShowImageInput(false);
+        setPostType("instagram");
+        setFilterStyle("none");
       } else {
         setError("Could not submit post.");
       }
@@ -55,8 +85,49 @@ export default function CreatePostCard({ currentUser, onPostCreated }: CreatePos
   if (!currentUser) return null;
 
   return (
-    <div className="bg-white border border-[#DBDBDB] rounded-xl p-4 shadow-[0_1px_3px_rgba(0,0,0,0.01)]" id="create-post-card">
-      <form onSubmit={handleSubmit} className="space-y-3">
+    <div className="bg-white border border-[#DBDBDB] rounded-xl p-5 shadow-xs" id="create-post-card">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        
+        {/* Trio Mode Platform Nav buttons */}
+        <div className="flex bg-[#F5F5F5] rounded-xl p-1 gap-1 border border-[#E9E9E9]">
+          <button
+            type="button"
+            onClick={() => { setPostType("instagram"); setShowImageInput(true); }}
+            className={`flex-1 py-2 text-center rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+              postType === "instagram" 
+                ? "bg-white text-[#262626] shadow-xs border border-[#E9E9E9]" 
+                : "text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            <span className="text-sm">📸</span>
+            <span>Instagram Feed</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setPostType("telegram"); }}
+            className={`flex-1 py-2 text-center rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+              postType === "telegram" 
+                ? "bg-white text-[#0088CC] shadow-xs border border-[#E9E9E9]" 
+                : "text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            <span className="text-sm">📢</span>
+            <span>Telegram Channel</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setPostType("snapchat"); setShowImageInput(true); }}
+            className={`flex-1 py-2 text-center rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+              postType === "snapchat" 
+                ? "bg-white text-[#FFFC00] text-black shadow-xs border border-[#E9E9E9]" 
+                : "text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            <span className="text-sm">⚡️</span>
+            <span>Snapchat Lens</span>
+          </button>
+        </div>
+
         {/* Author + Textarea */}
         <div className="flex gap-3">
           <img
@@ -69,7 +140,13 @@ export default function CreatePostCard({ currentUser, onPostCreated }: CreatePos
             <textarea
               required
               rows={3}
-              placeholder={`What's on your mind, ${currentUser.displayName.split(" ")[0]}?`}
+              placeholder={
+                postType === "telegram"
+                  ? `Write a channel post with inline emoji reactions...`
+                  : postType === "snapchat"
+                  ? `Write a cool self-destructing layout caption...`
+                  : `What's on your mind, ${currentUser.displayName.split(" ")[0]}?`
+              }
               value={content}
               onChange={(e) => setContent(e.target.value)}
               className="w-full text-sm py-2 bg-transparent border-0 focus:outline-none focus:ring-0 placeholder-gray-400 resize-none text-[#262626] leading-relaxed"
@@ -77,6 +154,70 @@ export default function CreatePostCard({ currentUser, onPostCreated }: CreatePos
             />
           </div>
         </div>
+
+        {/* Interactive Lens or self-destruct properties for Snapchat */}
+        {postType === "snapchat" && (
+          <div className="bg-yellow-50/50 border border-yellow-200 rounded-xl p-3.5 space-y-3 animate-in fade-in duration-150">
+            <div className="flex items-center gap-2 text-[10px] text-yellow-700 font-bold uppercase tracking-wider">
+              <span className="text-base">⌛️</span>
+              <span>Self-Destruct Snapchat Lens Settings</span>
+            </div>
+            
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold text-gray-500 flex items-center gap-1">
+                <Filter className="w-3.5 h-3.5" />
+                Select Photo Filter/Lens:
+              </label>
+              <div className="flex gap-2 flex-wrap">
+                {SNAP_LENSES.map((lens) => (
+                  <button
+                    key={lens.id}
+                    type="button"
+                    onClick={() => setFilterStyle(lens.id)}
+                    className={`text-[10px] font-semibold px-2.5 py-1.5 rounded-lg border transition cursor-pointer ${
+                      filterStyle === lens.id
+                        ? "bg-yellow-100 border-yellow-400 text-yellow-800 font-bold"
+                        : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    {lens.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-4 pt-1">
+              <label className="text-[10px] font-bold text-gray-500 flex items-center gap-1">
+                <Clock className="w-3.5 h-3.5" />
+                Expires In:
+              </label>
+              <div className="flex gap-2">
+                {[4, 12, 24].map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => setExpireHours(h)}
+                    className={`text-[10px] px-2.5 py-1 rounded-md font-mono font-bold transition border cursor-pointer ${
+                      expireHours === h
+                        ? "bg-zinc-900 border-zinc-900 text-white"
+                        : "bg-white border-gray-200 text-gray-500 hover:bg-gray-50"
+                    }`}
+                  >
+                    {h} hrs
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Telegram specific tips */}
+        {postType === "telegram" && (
+          <div className="bg-[#F0F8FF] border border-[#B3D9FF] rounded-xl p-3 text-[11px] text-[#0066B2] font-semibold flex items-center gap-2 animate-in fade-in duration-150">
+            <span className="text-base">📢</span>
+            <span>Channel broadcast. Adds full interactive tap-reactions under your card automatically!</span>
+          </div>
+        )}
 
         {error && (
           <div className="flex items-center gap-1.5 p-2.5 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-600 font-medium">
@@ -87,11 +228,11 @@ export default function CreatePostCard({ currentUser, onPostCreated }: CreatePos
 
         {/* Optional Image Url Input */}
         {showImageInput && (
-          <div className="pl-13 space-y-2 animate-in slide-in-from-top-1 duration-150">
+          <div className="space-y-2 animate-in slide-in-from-top-1 duration-150">
             <div className="relative">
               <input
                 type="text"
-                placeholder="Paste any photo web link (https://...)"
+                placeholder={postType === "snapchat" ? "Attach image for your Snap filter lens! *" : "Paste any photo web link (https://...)"}
                 value={imageUrl}
                 onChange={(e) => setImageUrl(e.target.value)}
                 className="w-full text-xs px-3 py-2 bg-transparent border border-[#DBDBDB] rounded-lg focus:outline-none focus:border-[#0095F6] transition"
@@ -128,18 +269,27 @@ export default function CreatePostCard({ currentUser, onPostCreated }: CreatePos
             </div>
 
             {imageUrl && (
-              <div className="rounded-lg overflow-hidden border border-[#DBDBDB] bg-zinc-50 max-h-[140px] max-w-[240px] mt-2 relative group align-middle">
-                <img src={imageUrl} alt="attached preview" className="w-full h-full object-cover max-h-[140px]" />
+              <div className="rounded-lg overflow-hidden border border-[#DBDBDB] bg-zinc-50 max-h-[160px] max-w-[280px] mt-2 relative group align-middle">
+                {/* Apply Snapdragon filter in real-time preview of the card! */}
+                <img 
+                  src={imageUrl} 
+                  alt="attached preview" 
+                  className={`w-full h-full object-cover max-h-[160px] transition duration-200 ${
+                    postType === "snapchat" && filterStyle === "sepia" ? "sepia saturate-150 contrast-105" :
+                    postType === "snapchat" && filterStyle === "grayscale" ? "grayscale contrast-125" :
+                    postType === "snapchat" && filterStyle === "neon" ? "saturate-200 contrast-110 hue-rotate-60" :
+                    postType === "snapchat" && filterStyle === "blue" ? "hue-rotate-180 brightness-105 saturate-125" : ""
+                  }`} 
+                />
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                   <button
                     type="button"
                     onClick={() => {
                       setImageUrl("");
-                      setShowImageInput(false);
                     }}
-                    className="bg-white text-xs text-zinc-800 py-1 px-2.5 rounded font-semibold"
+                    className="bg-white text-xs text-zinc-805 py-1 px-2.5 rounded font-bold cursor-pointer"
                   >
-                    Remove
+                    Clear Filter Attached
                   </button>
                 </div>
               </div>
@@ -148,7 +298,7 @@ export default function CreatePostCard({ currentUser, onPostCreated }: CreatePos
         )}
 
         {/* Footer controls */}
-        <div className="flex items-center justify-between pt-2.5 border-t border-[#DBDBDB] pl-13">
+        <div className="flex items-center justify-between pt-2.5 border-t border-[#DBDBDB]">
           <button
             type="button"
             onClick={() => setShowImageInput(!showImageInput)}
@@ -160,17 +310,31 @@ export default function CreatePostCard({ currentUser, onPostCreated }: CreatePos
             id="post-attach-btn"
           >
             <ImageIcon className="w-4 h-4" />
-            <span>{showImageInput ? "Attachment active" : "Add Image"}</span>
+            <span>{showImageInput ? "Attachment Active" : "Add Photo Link"}</span>
           </button>
 
           <button
             type="submit"
             disabled={!content.trim() || isSubmitting}
-            className="flex items-center gap-1.5 py-2 px-4 rounded-lg bg-[#0095F6] hover:bg-[#007cd1] disabled:opacity-40 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer"
+            className={`flex items-center gap-1.5 py-2 px-4 rounded-lg font-bold text-xs shadow-xs transition-colors cursor-pointer text-white ${
+              postType === "telegram" 
+                ? "bg-[#0088CC] hover:bg-[#0077b5]" 
+                : postType === "snapchat" 
+                ? "bg-[#FFFC00] hover:bg-[#ebd500] text-black" 
+                : "bg-zinc-900 hover:bg-zinc-800"
+            }`}
             id="post-submit-btn"
           >
             <Send className="w-3.5 h-3.5" />
-            <span>{isSubmitting ? "Sharing..." : "Share Post"}</span>
+            <span>
+              {isSubmitting 
+                ? "Sharing..." 
+                : postType === "telegram" 
+                ? "Broadcast to Telegram" 
+                : postType === "snapchat" 
+                ? "Snap self-destruct" 
+                : "Instagram Feed Post"}
+            </span>
           </button>
         </div>
       </form>

@@ -6,6 +6,8 @@ export interface User {
   followers: string[]; // usernames of followers
   following: string[]; // usernames being followed
   createdAt: string;
+  googleEmail?: string;
+  isGoogleUser?: boolean;
 }
 
 export interface Comment {
@@ -23,9 +25,24 @@ export interface Post {
   likes: string[]; // usernames who liked the post
   comments: Comment[];
   createdAt: string;
+  postType?: "instagram" | "snapchat" | "telegram";
+  telegramReactions?: Record<string, number>; // reactions like {"👍": 4, "🔥": 2} ...
+  filterStyle?: string; // CSS class for Snapchat filter
+  expireHours?: number; // e.g. 24
+}
+
+export interface Story {
+  id: string;
+  authorId: string;
+  mediaUrl?: string;
+  text?: string;
+  bgGradient?: string;
+  createdAt: string;
 }
 
 export interface DBState {
   users: Record<string, User>;
   posts: Post[];
+  stories: Story[];
 }
+

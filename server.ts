@@ -61,12 +61,13 @@ function getInitialDB(): DBState {
             createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString()
           }
         ],
-        createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString()
+        createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+        postType: "instagram"
       },
       {
         id: "p2",
         authorId: "yash_m",
-        content: "Hello world! 🚀 Welcoming everyone to the Mini Social Media App. Explore the dynamic profile switching capability, follow back your friends, and comment on trending items in real-time! Written in TypeScript + React + Express.",
+        content: "Hello world! 🚀 Welcoming everyone to MiniSocial. Explore the multi-platform hybrid experience that merges Telegram channel broadcasts with Instagram visual storytelling and self-destructing Snapchat lenses with stickers!",
         likes: ["alice_dev", "tech_pioneer"],
         comments: [
           {
@@ -82,15 +83,44 @@ function getInitialDB(): DBState {
             createdAt: new Date(Date.now() - 30 * 60 * 1000).toISOString()
           }
         ],
-        createdAt: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString()
+        createdAt: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(),
+        postType: "telegram",
+        telegramReactions: { "👍": 5, "🔥": 7, "❤️": 3, "🎉": 2 }
       },
       {
         id: "p3",
         authorId: "tech_pioneer",
-        content: "Local node setups are highly robust for isolated microservices. Clean endpoints, validated models, simple JSON file payloads. Perfection. 📂☕️💻",
+        content: "Filtered through Snapchat's ultimate vintage frame! Captured during my evening architecture study. Expiring soon! 📸⏳",
+        imageUrl: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=600",
         likes: [],
         comments: [],
-        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+        createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        postType: "snapchat",
+        filterStyle: "sepia",
+        expireHours: 24
+      }
+    ],
+    stories: [
+      {
+        id: "s1",
+        authorId: "alice_dev",
+        mediaUrl: "https://images.unsplash.com/photo-1541701494587-cb58502866ab?auto=format&fit=crop&q=80&w=400",
+        text: "Interactive color spaces look beautiful! 🌈✨",
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: "s2",
+        authorId: "yash_m",
+        bgGradient: "linear-gradient(135deg, #12c2e9, #c471ed, #f64f59)",
+        text: "Telegram UI speeds are insane under load! ⚡️📱",
+        createdAt: new Date().toISOString()
+      },
+      {
+        id: "s3",
+        authorId: "tech_pioneer",
+        mediaUrl: "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&q=80&w=400",
+        text: "Coding all night long with a cup of tea ☕️",
+        createdAt: new Date().toISOString()
       }
     ]
   };
@@ -170,7 +200,7 @@ app.get("/api/users/:id", (req, res) => {
 });
 
 app.post("/api/users", (req, res) => {
-  const { username, displayName, bio, avatarUrl } = req.body;
+  const { username, displayName, bio, avatarUrl, googleEmail, isGoogleUser } = req.body;
 
   if (!username || !displayName) {
     return res.status(400).json({ error: "Username and display name are required." });
@@ -192,7 +222,9 @@ app.post("/api/users", (req, res) => {
     avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${normalizedId}`,
     followers: [],
     following: [],
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    googleEmail: googleEmail,
+    isGoogleUser: isGoogleUser
   };
 
   dbState.users[normalizedId] = newUser;
@@ -246,7 +278,7 @@ app.get("/api/posts", (req, res) => {
 });
 
 app.post("/api/posts", (req, res) => {
-  const { content, imageUrl } = req.body;
+  const { content, imageUrl, postType, filterStyle, expireHours } = req.body;
   if (!content || !content.trim()) {
     return res.status(100).json({ error: "Post content cannot be empty." });
   }
@@ -258,12 +290,67 @@ app.post("/api/posts", (req, res) => {
     imageUrl: imageUrl ? imageUrl.trim() : undefined,
     likes: [],
     comments: [],
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    postType: postType || "instagram",
+    filterStyle: filterStyle,
+    expireHours: expireHours,
+    telegramReactions: postType === "telegram" ? { "👍": 0, "🔥": 0, "❤️": 0 } : undefined
   };
 
   dbState.posts.push(newPost);
   writeDB(dbState);
   res.status(210).json(newPost);
+});
+
+// React to a Telegram post
+app.post("/api/posts/:id/react", (req, res) => {
+  const postId = req.params.id;
+  const { reaction } = req.body;
+  if (!reaction) {
+    return res.status(400).json({ error: "Reaction is required." });
+  }
+
+  const post = dbState.posts.find(p => p.id === postId);
+  if (!post) {
+    return res.status(404).json({ error: "Post not found." });
+  }
+
+  if (!post.telegramReactions) {
+    post.telegramReactions = {};
+  }
+
+  post.telegramReactions[reaction] = (post.telegramReactions[reaction] || 0) + 1;
+  writeDB(dbState);
+  res.json(post);
+});
+
+// GET Stories
+app.get("/api/stories", (req, res) => {
+  if (!dbState.stories) {
+    dbState.stories = [];
+  }
+  res.json(dbState.stories);
+});
+
+// POST Story
+app.post("/api/stories", (req, res) => {
+  const { mediaUrl, text, bgGradient } = req.body;
+  if (!dbState.stories) {
+    dbState.stories = [];
+  }
+
+  const newStory = {
+    id: `story_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+    authorId: currentActiveUserId,
+    mediaUrl: mediaUrl ? mediaUrl.trim() : undefined,
+    text: text ? text.trim() : undefined,
+    bgGradient: bgGradient,
+    createdAt: new Date().toISOString()
+  };
+
+  dbState.stories.push(newStory);
+  writeDB(dbState);
+  res.status(210).json(newStory);
 });
 
 // Like Posts Toggle System

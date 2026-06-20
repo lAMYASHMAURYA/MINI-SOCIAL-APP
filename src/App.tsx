@@ -20,22 +20,29 @@ import {
   Activity
 } from "lucide-react";
 
-import { User, Post } from "./types";
+import { User, Post, Story } from "./types";
 import PostCard from "./components/PostCard";
 import UserProfileModal from "./components/UserProfileModal";
 import CreateProfileModal from "./components/CreateProfileModal";
 import CreatePostCard from "./components/CreatePostCard";
 
+import StoryBubbleTray from "./components/StoryBubbleTray";
+import StoryViewerModal from "./components/StoryViewerModal";
+import AddStoryModal from "./components/AddStoryModal";
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
+  const [stories, setStories] = useState<Story[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
   // Modals & Navigation state
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showCreateProfileModal, setShowCreateProfileModal] = useState(false);
+  const [showAddStoryModal, setShowAddStoryModal] = useState(false);
+  const [activeStoryUserId, setActiveStoryUserId] = useState<string | null>(null);
   const [feedFilter, setFeedFilter] = useState<"all" | "following">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -46,6 +53,27 @@ export default function App() {
   useEffect(() => {
     fetchInitialData();
   }, []);
+
+  // Softly navigate and highlight the shared post if postId is in query params
+  useEffect(() => {
+    if (!isLoading && posts.length > 0) {
+      const params = new URLSearchParams(window.location.search);
+      const sharedPostId = params.get("postId");
+      if (sharedPostId) {
+        // Clear query parameters from URL state after reading to preserve fresh refreshes if they navigate
+        setTimeout(() => {
+          const element = document.getElementById(`post-card-${sharedPostId}`);
+          if (element) {
+            element.scrollIntoView({ behavior: "smooth", block: "center" });
+            element.classList.add("ring-2", "ring-[#0095F6]", "ring-offset-2");
+            setTimeout(() => {
+              element.classList.remove("ring-2", "ring-[#0095F6]", "ring-offset-2");
+            }, 3000);
+          }
+        }, 600);
+      }
+    }
+  }, [isLoading, posts]);
 
   const fetchInitialData = async () => {
     setIsLoading(true);
@@ -71,6 +99,12 @@ export default function App() {
       if (postsRes.ok) {
         setPosts(await postsRes.json());
       }
+
+      // 4. All platform stories
+      const storiesRes = await fetch("/api/stories");
+      if (storiesRes.ok) {
+        setStories(await storiesRes.json());
+      }
     } catch (err: any) {
       console.error("Networking error:", err);
       setError("Server connection failed. Verify Express server is running.");
@@ -79,15 +113,21 @@ export default function App() {
     }
   };
 
-  const handleCreatePost = async (content: string, imageUrl?: string): Promise<boolean> => {
+  const handleCreatePost = async (
+    content: string, 
+    imageUrl?: string,
+    postType?: "instagram" | "snapchat" | "telegram",
+    filterStyle?: string,
+    expireHours?: number
+  ): Promise<boolean> => {
     try {
       const res = await fetch("/api/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, imageUrl })
+        body: JSON.stringify({ content, imageUrl, postType, filterStyle, expireHours })
       });
       if (res.ok) {
-        // Refresh feed & update profile posts if modal is open
+        // Refresh feed
         const freshPostsRes = await fetch("/api/posts");
         if (freshPostsRes.ok) {
           const freshPosts = await freshPostsRes.json();
@@ -119,6 +159,22 @@ export default function App() {
     }
   };
 
+  const handleTelegramReact = async (postId: string, reaction: string) => {
+    try {
+      const res = await fetch(`/api/posts/${postId}/react`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reaction })
+      });
+      if (res.ok) {
+        const updatedPost = await res.json();
+        setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+      }
+    } catch (err) {
+      console.error("Failed to post reaction:", err);
+    }
+  };
+
   const handleCommentSubmit = async (postId: string, content: string): Promise<void> => {
     try {
       const res = await fetch(`/api/posts/${postId}/comment`, {
@@ -138,6 +194,29 @@ export default function App() {
     } catch (err) {
       console.error(err);
       throw err;
+    }
+  };
+
+  const handlePublishStory = async (storyForm: {
+    mediaUrl?: string;
+    text?: string;
+    bgGradient?: string;
+  }) => {
+    try {
+      const res = await fetch("/api/stories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(storyForm)
+      });
+      if (res.ok) {
+        const storiesRes = await fetch("/api/stories");
+        if (storiesRes.ok) {
+          setStories(await storiesRes.json());
+        }
+        setShowAddStoryModal(false);
+      }
+    } catch (err) {
+      console.error("Failed to add story item", err);
     }
   };
 
@@ -177,6 +256,8 @@ export default function App() {
     displayName: string;
     bio: string;
     avatarUrl: string;
+    googleEmail?: string;
+    isGoogleUser?: boolean;
   }): Promise<User | null> => {
     const res = await fetch("/api/users", {
       method: "POST",
@@ -271,17 +352,17 @@ export default function App() {
   });
 
   return (
-    <div className="min-h-screen bg-[#FAFAFA] text-[#262626] font-sans flex flex-col" id="app-root">
+    <div className="min-h-screen bg-[#FAFAFA] text-[#262626] font-sans flex flex-col animate-fadeIn" id="app-root">
       
       {/* Header Bar */}
       <header className="sticky top-0 z-40 bg-white border-b border-[#DBDBDB] px-4 md:px-8 py-3.5 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-[#262626] flex items-center justify-center text-white">
-            <Activity className="w-4.5 h-4.5" />
+            <Activity className="w-4.5 h-4.5 text-white" />
           </div>
           <div>
-            <h1 className="text-base font-bold tracking-tight text-[#262626] leading-none">MiniSocial</h1>
-            <span className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">For You Feed</span>
+            <h1 className="text-sm font-bold tracking-tight text-[#262626] leading-none uppercase font-sans">Telegram X Instagram X Snap</h1>
+            <span className="text-[9px] text-[#0095F6] font-extrabold uppercase tracking-widest">Minimalist Hybrid Social</span>
           </div>
         </div>
 
@@ -289,21 +370,21 @@ export default function App() {
         <div className="flex items-center gap-2.5">
           <button
             onClick={handleResetDatabase}
-            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 bg-white hover:bg-gray-50 px-3.5 py-2.5 rounded-lg border border-[#DBDBDB] cursor-pointer font-semibold transition"
+            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 bg-white hover:bg-gray-50 px-3 py-2 rounded-lg border border-[#DBDBDB] cursor-pointer font-bold transition-all shadow-2xs"
             title="Reset DB schemas back to primary seeds"
             id="reset-db-btn"
           >
             <RefreshCw className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Reset Seed</span>
+            <span className="hidden sm:inline">Reset Baseline</span>
           </button>
 
           <button
             onClick={() => setShowCreateProfileModal(true)}
-            className="flex items-center gap-1.5 text-xs text-white bg-[#0095F6] hover:bg-[#007cd1] px-4 py-2.5 rounded-lg font-bold shadow-sm cursor-pointer transition"
+            className="flex items-center gap-1.5 text-xs text-white bg-zinc-90 w shadow-md hover:bg-zinc-800 px-4 py-2 rounded-lg font-bold cursor-pointer transition-all border border-zinc-900"
             id="create-profile-header-btn"
           >
             <Plus className="w-4 h-4" />
-            <span className="hidden sm:inline">Register Profile</span>
+            <span>Join with Google / New Profile</span>
           </button>
         </div>
       </header>
@@ -314,12 +395,16 @@ export default function App() {
         {/* LEFT COLUMN: Active user badge + simulation panel */}
         <section className="w-full lg:w-72 flex-shrink-0 space-y-5" id="sidebar-left">
           {currentUser ? (
-            <div className="bg-white border border-[#DBDBDB] rounded-xl p-4.5 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
-              <div className="flex items-center gap-2.5 mb-3.5">
-                <div className="bg-[#FAFAFA] border border-[#DBDBDB] text-gray-500 text-[10px] font-bold px-2 py-0.5 uppercase tracking-wide rounded">
-                  Active Session
-                </div>
-                <div className="text-[11px] text-gray-400 font-semibold">Simulated User</div>
+            <div className="bg-white border border-[#DBDBDB] rounded-xl p-4.5 shadow-xs">
+              <div className="flex items-center justify-between mb-3.5">
+                <span className="bg-[#FAFAFA] border border-[#DBDBDB] text-gray-500 text-[10px] font-bold px-2 py-0.5 uppercase tracking-wide rounded">
+                  Current Session
+                </span>
+                {currentUser.isGoogleUser && (
+                  <span className="text-[10px] text-[#0095F6] font-bold flex items-center gap-1">
+                    <span className="text-xs">🔒</span> Google Account
+                  </span>
+                )}
               </div>
 
               {/* Current user card click triggers their profile view */}
@@ -328,46 +413,59 @@ export default function App() {
                 className="w-full text-left flex items-center gap-3 p-2 hover:bg-[#FAFAFA] rounded-lg transition cursor-pointer group"
                 id="current-user-card-btn"
               >
-                <img
-                  src={currentUser.avatarUrl}
-                  alt={currentUser.displayName}
-                  referrerPolicy="no-referrer"
-                  className="w-11 h-11 rounded-full object-cover border border-[#DBDBDB]"
-                />
+                <div className="relative">
+                  <img
+                    src={currentUser.avatarUrl}
+                    alt={currentUser.displayName}
+                    referrerPolicy="no-referrer"
+                    className="w-11 h-11 rounded-full object-cover border border-[#DBDBDB]"
+                  />
+                  {currentUser.isGoogleUser && (
+                    <span className="absolute -bottom-1 -right-1 bg-blue-500 text-white rounded-full p-0.5 border border-white text-[8px]" title="Authenticated via Google OAuth">
+                      ✓
+                    </span>
+                  )}
+                </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="font-bold text-[#262626] text-sm group-hover:underline truncate">{currentUser.displayName}</h3>
                   <p className="text-gray-400 text-xs truncate">@{currentUser.id}</p>
                 </div>
               </button>
 
+              {currentUser.googleEmail && (
+                <div className="mt-2.5 px-2.5 py-1.5 bg-gray-50 border border-[#E9E9E9] rounded-lg text-[10px] text-gray-500 font-mono overflow-ellipsis truncate">
+                  email: {currentUser.googleEmail}
+                </div>
+              )}
+
               <div className="mt-4 pt-3.5 border-t border-[#DBDBDB] grid grid-cols-2 text-center text-xs">
                 <div>
                   <div className="font-bold text-[#262626]">{currentUser.followers.length}</div>
-                  <div className="text-[10px] text-gray-400 uppercase font-semibold">Followers</div>
+                  <div className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Followers</div>
                 </div>
                 <div className="border-l border-[#DBDBDB]">
                   <div className="font-bold text-[#262626]">{currentUser.following.length}</div>
-                  <div className="text-[10px] text-gray-400 uppercase font-semibold">Following</div>
+                  <div className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Following</div>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="bg-zinc-50 border border-[#DBDBDB] rounded-xl p-4 text-center text-xs text-zinc-500">
+            <div className="bg-zinc-50 border border-[#DBDBDB] rounded-xl p-4 text-center text-xs text-zinc-500 font-semibold">
               No simulated user is active. Please register a profile or refresh first!
             </div>
           )}
 
           {/* SIMULATE ANOTHER USER LIST (Enables easy testing of cross liking/follow) */}
-          <div className="bg-white border border-[#DBDBDB] rounded-xl p-4.5 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 flex items-center gap-1.5">
+          <div className="bg-white border border-[#DBDBDB] rounded-xl p-4.5 shadow-xs">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2.5 flex items-center gap-1.5">
               <Eye className="w-3.5 h-3.5 text-gray-500" />
-              <span>Switch Simulated User</span>
+              <span>Simulated Sessions</span>
             </h3>
-            <p className="text-[10px] text-gray-400 mb-3 leading-normal font-medium">
-              Click below to change the logged-in session, write comments, or follow others to test the reactivity!
+            <p className="text-[10px] text-gray-400 mb-3.5 leading-relaxed font-semibold">
+              Switch profiles below instantly to simulate post likes, followers, write comments, or test Stories!
             </p>
 
-            <div className="space-y-2">
+            <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
               {users.map((u) => {
                 const isActive = currentUser?.id === u.id;
                 return (
@@ -376,20 +474,25 @@ export default function App() {
                     onClick={() => handleSwitchSimulatedUser(u.id)}
                     className={`w-full text-left flex items-center justify-between p-2 rounded-lg transition text-xs font-medium border cursor-pointer ${
                       isActive
-                        ? "bg-[#FAFAFA] border-[#DBDBDB] text-[#262626] font-bold shadow-sm"
+                        ? "bg-[#FAFAFA] border-[#DBDBDB] text-[#262626] font-bold shadow-2xs"
                         : "bg-white border-transparent hover:bg-[#FAFAFA] text-gray-500 hover:text-gray-800"
                     }`}
                     id={`simulate-user-select-${u.id}`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <img src={u.avatarUrl} alt={u.displayName} className="w-6.5 h-6.5 rounded-full object-cover border border-[#DBDBDB]" />
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="relative">
+                        <img src={u.avatarUrl} alt={u.displayName} className="w-6.5 h-6.5 rounded-full object-cover border border-[#DBDBDB]" />
+                        {u.isGoogleUser && (
+                          <span className="absolute -bottom-0.5 -right-0.5 bg-[#0095F6] text-white rounded-full w-2 h-2 flex items-center justify-center text-[7px]" />
+                        )}
+                      </div>
                       <div className="min-w-0">
-                        <p className="truncate text-xs font-semibold">{u.displayName}</p>
-                        <p className="text-[10px] text-gray-400 truncate">@{u.id}</p>
+                        <p className="truncate text-xs font-bold">{u.displayName}</p>
+                        <p className="text-[9px] text-gray-400 truncate">@{u.id}</p>
                       </div>
                     </div>
                     {isActive && (
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#0095F6] shrink-0" />
+                      <span className="w-2 h-2 rounded-full bg-[#0095F6] shrink-0" />
                     )}
                   </button>
                 );
@@ -399,14 +502,14 @@ export default function App() {
         </section>
 
         {/* CENTER COLUMN: Feeds, Post creation, query input */}
-         <section className="flex-1 space-y-5" id="main-content">
+        <section className="flex-1 space-y-5" id="main-content">
           
           {/* Mobile Tab Toggle */}
           <div className="flex lg:hidden bg-white p-1 rounded-xl border border-[#DBDBDB]">
             <button
               onClick={() => setMobileTab("feed")}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition ${
-                mobileTab === "feed" ? "bg-[#0095F6] text-white shadow-sm" : "text-gray-500"
+                mobileTab === "feed" ? "bg-zinc-900 text-white shadow-sm" : "text-gray-500"
               }`}
             >
               <Compass className="w-4 h-4" />
@@ -415,7 +518,7 @@ export default function App() {
             <button
               onClick={() => setMobileTab("network")}
               className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-semibold transition ${
-                mobileTab === "network" ? "bg-[#0095F6] text-white shadow-sm" : "text-gray-500"
+                mobileTab === "network" ? "bg-zinc-900 text-white shadow-sm" : "text-gray-500"
               }`}
             >
               <Users className="w-4 h-4" />
@@ -426,13 +529,22 @@ export default function App() {
           {/* View Container bounded by Mobile Navigation Tabs */}
           <div className={`${mobileTab === "feed" ? "block" : "hidden lg:block"} space-y-5`}>
             
+            {/* Instagram Active Story tray */}
+            <StoryBubbleTray
+              currentUser={currentUser}
+              stories={stories}
+              usersMap={usersMap}
+              onAddStoryClick={() => setShowAddStoryModal(true)}
+              onUserStorySelect={(authorId) => setActiveStoryUserId(authorId)}
+            />
+
             {/* Create Post Card */}
             {currentUser && (
               <CreatePostCard currentUser={currentUser} onPostCreated={handleCreatePost} />
             )}
 
             {/* Filter Timelines & Search */}
-            <div className="bg-white border border-[#DBDBDB] rounded-xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
+            <div className="bg-white border border-[#DBDBDB] rounded-xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between shadow-xs">
               {/* Timeline feed filter links */}
               <div className="flex bg-[#FAFAFA] border border-[#DBDBDB] p-1 rounded-xl w-full md:w-auto">
                 <button
@@ -445,7 +557,7 @@ export default function App() {
                   id="feed-filter-all-btn"
                 >
                   <Compass className="w-3.5 h-3.5" />
-                  <span>Explore All</span>
+                  <span>Explore Feed</span>
                 </button>
                 <button
                   onClick={() => setFeedFilter("following")}
@@ -467,7 +579,7 @@ export default function App() {
                 <Search className="absolute left-3 text-gray-400 w-3.5 h-3.5" />
                 <input
                   type="text"
-                  placeholder="Search posts or users..."
+                  placeholder="Search tags, posts or users..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="w-full text-xs pl-8.5 pr-3 py-2.5 bg-white border border-[#DBDBDB] rounded-xl focus:outline-none focus:border-[#0095F6] transition"
@@ -487,8 +599,8 @@ export default function App() {
             {/* Posts Feed Timeline Lists */}
             {isLoading ? (
               <div className="text-center py-16 bg-white border border-[#DBDBDB] rounded-xl flex flex-col items-center justify-center gap-3">
-                <div className="w-8 h-8 rounded-full border-2 border-[#0095F6] border-t-transparent animate-spin" />
-                <p className="text-sm text-gray-400 font-medium">Loading platform feeds...</p>
+                <div className="w-8 h-8 rounded-full border-2 border-zinc-900 border-t-transparent animate-spin" />
+                <p className="text-sm text-gray-450 font-semibold">Loading platform feed...</p>
               </div>
             ) : finalFilteredPosts.length > 0 ? (
               <div className="space-y-4" id="posts-timeline-feed">
@@ -501,15 +613,16 @@ export default function App() {
                     onLike={handleLikeToggle}
                     onComment={handleCommentSubmit}
                     onUserClick={handleOpenUserProfile}
+                    onReact={handleTelegramReact}
                   />
                 ))}
               </div>
             ) : (
               <div className="text-center py-16 bg-white border border-[#DBDBDB] rounded-xl p-6">
-                <p className="text-sm text-gray-500 font-semibold">No posts matches your selection.</p>
-                <p className="text-xs text-gray-400 mt-1.5 max-w-sm mx-auto font-medium">
+                <p className="text-sm text-gray-500 font-semibold">No posts match your selection.</p>
+                <p className="text-xs text-gray-400 mt-1.5 max-w-sm mx-auto font-medium leading-relaxed">
                   {feedFilter === "following" 
-                    ? "Follow participants on the right sidebar or publish posts to build your personal timeline feed."
+                    ? "Follow some participants in the directory or share updates to build your personal timeline feed."
                     : "Be the first one to create a new thread!"}
                 </p>
                 {searchQuery && (
@@ -517,7 +630,7 @@ export default function App() {
                     onClick={() => setSearchQuery("")}
                     className="mt-4 text-xs font-bold text-[#0095F6] hover:underline cursor-pointer"
                   >
-                    Clear Search Query
+                    Clear Search Filter
                   </button>
                 )}
               </div>
@@ -529,13 +642,13 @@ export default function App() {
         <section className={`w-full lg:w-72 flex-shrink-0 space-y-5 ${mobileTab === "network" ? "block" : "hidden lg:block"}`} id="sidebar-right">
           
           {/* WHO TO FOLLOW LIST */}
-          <div className="bg-white border border-[#DBDBDB] rounded-xl p-4.5 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
+          <div className="bg-white border border-[#DBDBDB] rounded-xl p-4.5 shadow-xs">
             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 flex items-center justify-between">
               <span className="flex items-center gap-1.5">
-                <Users className="w-3.5 h-3.5" />
+                <Users className="w-3.5 h-3.5 text-gray-550" />
                 <span>Suggestions For You</span>
               </span>
-              <span className="bg-[#FAFAFA] border border-[#DBDBDB] text-gray-500 text-[10px] px-2 py-0.5 rounded font-bold">
+              <span className="bg-[#FAFAFA] border border-[#DBDBDB] text-gray-550 text-[10px] px-2 py-0.5 rounded font-extrabold">
                 {whoToFollowCandidates.length}
               </span>
             </h3>
@@ -567,24 +680,24 @@ export default function App() {
                 ))}
               </div>
             ) : (
-              <p className="text-gray-400 italic text-[11px] text-center py-4 font-medium">
-                Following everyone on the system! 🚀
+              <p className="text-gray-400 italic text-[11px] text-center py-4 font-semibold">
+                Following everyone! 🚀📈
               </p>
             )}
           </div>
 
           {/* ALL REGISTERED MEMBERS LIST */}
-          <div className="bg-white border border-[#DBDBDB] rounded-xl p-4.5 shadow-[0_1px_3px_rgba(0,0,0,0.01)]">
+          <div className="bg-white border border-[#DBDBDB] rounded-xl p-4.5 shadow-xs">
             <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-2.5 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Platform Registry ({users.length})</span>
+              <Sparkles className="w-3.5 h-3.5 text-yellow-500" />
+              <span>Verified Directory ({users.length})</span>
             </h3>
             <div className="flex flex-wrap gap-1.5">
               {users.map(u => (
                 <button
                   key={u.id}
                   onClick={() => handleOpenUserProfile(u.id)}
-                  className="flex items-center gap-1.5 bg-white hover:bg-zinc-50 border border-[#DBDBDB] rounded-full py-1 px-2.5 cursor-pointer transition text-[11px] font-semibold text-gray-650"
+                  className="flex items-center gap-1.5 bg-white hover:bg-zinc-50 border border-[#DBDBDB] rounded-full py-1 px-2.5 cursor-pointer transition text-[11px] font-bold text-gray-700 hover:border-[#0095F6]"
                   id={`registry-badge-${u.id}`}
                 >
                   <img src={u.avatarUrl} alt={u.displayName} className="w-4 h-4 rounded-full object-cover border border-[#DBDBDB]" />
@@ -596,27 +709,45 @@ export default function App() {
         </section>
       </main>
 
-        {/* MODAL: Detailed custom profile cards with follower visualization */}
-        {selectedUser && (
-          <UserProfileModal
-            user={selectedUser}
-            currentUser={currentUser}
-            usersMap={usersMap}
-            userPosts={posts.filter((p) => p.authorId === selectedUser.id)}
-            onClose={() => setSelectedUser(null)}
-            onFollowToggle={handleFollowToggle}
-            onSwitchUser={handleSwitchSimulatedUser}
-            onUserClick={handleOpenUserProfile}
-          />
-        )}
+      {/* STORY VIEWER PORTAL */}
+      {activeStoryUserId && (
+        <StoryViewerModal
+          userId={activeStoryUserId}
+          stories={stories}
+          usersMap={usersMap}
+          onClose={() => setActiveStoryUserId(null)}
+        />
+      )}
 
-        {/* MODAL: Profile signup form */}
-        {showCreateProfileModal && (
-          <CreateProfileModal
-            onClose={() => setShowCreateProfileModal(false)}
-            onSubmit={handleCreateProfileSubmit}
-          />
-        )}
+      {/* STORY ADD MODAL */}
+      {showAddStoryModal && (
+        <AddStoryModal
+          onClose={() => setShowAddStoryModal(false)}
+          onSubmit={handlePublishStory}
+        />
+      )}
+
+      {/* MODAL: Detailed custom profile cards with follower visualization */}
+      {selectedUser && (
+        <UserProfileModal
+          user={selectedUser}
+          currentUser={currentUser}
+          usersMap={usersMap}
+          userPosts={posts.filter((p) => p.authorId === selectedUser.id)}
+          onClose={() => setSelectedUser(null)}
+          onFollowToggle={handleFollowToggle}
+          onSwitchUser={handleSwitchSimulatedUser}
+          onUserClick={handleOpenUserProfile}
+        />
+      )}
+
+      {/* MODAL: Profile signup form */}
+      {showCreateProfileModal && (
+        <CreateProfileModal
+          onClose={() => setShowCreateProfileModal(false)}
+          onSubmit={handleCreateProfileSubmit}
+        />
+      )}
     </div>
   );
 }

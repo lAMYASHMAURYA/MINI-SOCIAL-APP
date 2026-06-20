@@ -4,6 +4,7 @@ import fs from "fs";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { DBState, User, Post, Comment } from "./src/types";
+import { GoogleGenAI, Type } from "@google/genai";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -206,13 +207,21 @@ app.post("/api/users", (req, res) => {
     return res.status(400).json({ error: "Username and display name are required." });
   }
 
-  const normalizedId = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+  let normalizedId = username.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
   if (!normalizedId) {
     return res.status(400).json({ error: "Invalid username character sequence." });
   }
 
   if (dbState.users[normalizedId]) {
-    return res.status(409).json({ error: "Username already taken." });
+    if (isGoogleUser) {
+      let suffix = 1;
+      while (dbState.users[`${normalizedId}${suffix}`]) {
+        suffix++;
+      }
+      normalizedId = `${normalizedId}${suffix}`;
+    } else {
+      return res.status(409).json({ error: "Username already taken." });
+    }
   }
 
   const newUser: User = {
@@ -300,6 +309,82 @@ app.post("/api/posts", (req, res) => {
   dbState.posts.push(newPost);
   writeDB(dbState);
   res.status(210).json(newPost);
+});
+
+// AI Hashtag Suggestion using Gemini
+app.post("/api/posts/suggest-hashtags", async (req, res) => {
+  const { content } = req.body;
+  if (!content || !content.trim()) {
+    return res.json({ hashtags: [] });
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    // Elegant client-side fallback matching common words/keywords if no key is supplied
+    const words = content.trim().split(/\s+/);
+    const heuristicTags: string[] = [];
+    words.forEach((w: string) => {
+      const clean = w.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+      if (clean.length > 4 && heuristicTags.length < 5) {
+        heuristicTags.push(`#${clean}`);
+      }
+    });
+    const defaults = ["#social", "#minisocial", "#tech", "#trending"];
+    while (heuristicTags.length < 4 && defaults.length > 0) {
+      const def = defaults.shift()!;
+      if (!heuristicTags.includes(def)) heuristicTags.push(def);
+    }
+    return res.json({ hashtags: heuristicTags, info: "No active API Secrets configured. Using text analytics fallback." });
+  }
+
+  try {
+    const ai = new GoogleGenAI({
+      apiKey: apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+
+    const prompt = `Analyze this post content and suggest 4 to 8 highly relevant, trendy social media hashtags (without the # symbol, e.g. "photography" not "#photography"). Keep them concise, appealing, and directly related to the text.
+Post content: "${content.replace(/"/g, '\\"')}"`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        systemInstruction: "You are a professional social media manager. Return only a JSON array of strings containing relevant keyword hashtags (without #).",
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.STRING,
+          },
+        },
+      },
+    });
+
+    const text = response.text;
+    if (text) {
+      const parsed = JSON.parse(text.trim());
+      if (Array.isArray(parsed)) {
+        const hashtags = parsed.map((tag: string) => {
+          const clean = tag.replace(/#/g, "").trim().toLowerCase();
+          return `#${clean}`;
+        }).filter(Boolean);
+        return res.json({ hashtags });
+      }
+    }
+    return res.json({ hashtags: [] });
+  } catch (err: any) {
+    console.error("Gemini API Error in hashtag suggestion:", err);
+    // Graceful fallback to avoid breaking typing experience
+    return res.json({ 
+      hashtags: ["#minisocial", "#developers", "#webdev"],
+      error: err.message || "Failed to generate hashtags dynamically."
+    });
+  }
 });
 
 // React to a Telegram post

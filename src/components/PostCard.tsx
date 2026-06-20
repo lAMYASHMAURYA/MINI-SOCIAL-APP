@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Heart, MessageCircle, Send, Image, Calendar, Share2, Copy, Check, X, ShieldAlert, Sparkles } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { Heart, MessageCircle, Send, Image, Calendar, Share2, Copy, Check, X, ShieldAlert, Sparkles, Bookmark } from "lucide-react";
 import { Post, User } from "../types";
 
 interface PostCardProps {
@@ -11,6 +11,9 @@ interface PostCardProps {
   onComment: (postId: string, content: string) => Promise<void>;
   onUserClick: (userId: string) => void;
   onReact?: (postId: string, reaction: string) => void | Promise<void>;
+  isBookmarked: boolean;
+  onBookmarkToggle: (postId: string) => void;
+  onHashtagClick?: (hashtag: string) => void;
 }
 
 export default function PostCard({
@@ -21,12 +24,80 @@ export default function PostCard({
   onComment,
   onUserClick,
   onReact,
+  isBookmarked,
+  onBookmarkToggle,
+  onHashtagClick,
 }: PostCardProps) {
   const [commentContent, setCommentContent] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showComments, setShowComments] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // Snapdragon self-destruct state
+  const [timeLeft, setTimeLeft] = useState<string>("");
+  const [isExpired, setIsExpired] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (post.postType !== "snapchat" || !post.createdAt) return;
+    const expireHoursVal = post.expireHours || 24;
+    const expireDuration = expireHoursVal * 60 * 60 * 1000;
+    const expirationTime = new Date(post.createdAt).getTime() + expireDuration;
+
+    const updateTimer = () => {
+      const now = Date.now();
+      const diff = expirationTime - now;
+      if (diff <= 0) {
+        setTimeLeft("Expired");
+        setIsExpired(true);
+      } else {
+        const h = Math.floor(diff / (1000 * 60 * 60));
+        const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const s = Math.floor((diff % (1000 * 60)) / 1000);
+        setTimeLeft(`${h}h ${m}m ${s}s`);
+        setIsExpired(false);
+      }
+    };
+
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [post.createdAt, post.expireHours, post.postType]);
+
+  const renderContentWithHashtags = (text: string) => {
+    if (!text) return "";
+    const tokens = text.split(/(\s+)/);
+    return tokens.map((token, idx) => {
+      if (token.startsWith("#") && token.length > 1) {
+        // Remove trailing punctuation from hashtag detection
+        const cleanTag = token.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
+        return (
+          <span
+            key={idx}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onHashtagClick) {
+                onHashtagClick(cleanTag);
+              }
+            }}
+            className="text-[#0095F6] hover:underline cursor-pointer font-semibold"
+          >
+            {token}
+          </span>
+        );
+      }
+      return token;
+    });
+  };
+
+  const getTelegramViews = () => {
+    let hash = 0;
+    for (let i = 0; i < post.id.length; i++) {
+      hash = post.id.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const views = Math.abs(hash % 910) + 75;
+    return views;
+  };
 
   const handleCopyLink = async () => {
     const shareUrl = `${window.location.origin}/?postId=${post.id}`;
@@ -104,27 +175,34 @@ export default function PostCard({
         isTelegram 
           ? "border-[#0088CC]/30 hover:border-[#0088CC]/60 bg-gradient-to-b from-[#F5FBFF]/40 to-white" 
           : isSnapchat 
-          ? "border-[#FFFC00]/50 hover:border-[#FFFC00]" 
-          : "border-[#DBDBDB]"
+          ? "border-[#FFFC00]/50 hover:border-[#FFFC00] bg-yellow-50/5" 
+          : "border-[#DBDBDB] hover:border-gray-300"
       }`} 
       id={`post-card-${post.id}`}
     >
       {/* Banner indicator badges for Hybrid platforms */}
       {isTelegram && (
         <div className="bg-[#0088CC] text-white px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider flex items-center justify-between">
-          <span className="flex items-center gap-1">
-            <span className="animate-pulse">●</span> Telegram Channel Post
+          <span className="flex items-center gap-1.5">
+            <span className="animate-pulse text-sky-200">●</span> Telegram Channel Broadcast
           </span>
-          <span className="font-mono text-[9px] opacity-90">Broadcast ID: t.me/{author.id}</span>
+          <div className="flex items-center gap-3">
+            <span className="bg-[#0077b5]/60 text-sky-100 font-bold px-1.5 py-0.5 rounded text-[8px] flex items-center gap-1 font-sans">
+              <span>👁</span> {getTelegramViews()} views
+            </span>
+            <span className="font-mono text-[9px] opacity-90">t.me/{author.id}</span>
+          </div>
         </div>
       )}
 
       {isSnapchat && (
         <div className="bg-[#FFFC00] text-black px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider flex items-center justify-between">
           <span className="flex items-center gap-1.5">
-            ⌛ Self-Destruct Snapshot
+            👻 SNAPCHAT SELF-DESTRUCT LENS
           </span>
-          <span className="font-sans font-extrabold text-[9px] text-[#A69B00]">Expires in 24 Hrs</span>
+          <span className="font-mono text-[9px] font-extrabold text-[#9A8F00] bg-white/40 px-1.5 py-0.5 rounded">
+            {isExpired ? "🔴 EXPIRED" : `⏳ ${timeLeft}`}
+          </span>
         </div>
       )}
 
@@ -161,24 +239,48 @@ export default function PostCard({
             <span className="text-zinc-300 text-xs">•</span>
             <span className="text-gray-400 text-xs">{formatDate(post.createdAt)}</span>
           </div>
-          <p className="mt-2 text-[#262626] text-sm text-left leading-relaxed whitespace-pre-wrap">{post.content}</p>
+          <p className="mt-2 text-[#262626] text-sm text-left leading-relaxed whitespace-pre-wrap">
+            {renderContentWithHashtags(post.content)}
+          </p>
         </div>
       </div>
 
-      {/* Post Attachment Image (if available) with camera lens overlays */}
+      {/* Post Attachment Image (if available) with camera lens overlays / Expiration state */}
       {post.imageUrl && (
         <div className="px-4 pb-3.5">
-          <div className="rounded-lg overflow-hidden border border-[#DBDBDB] bg-[#FAFAFA] max-h-[350px] relative group">
-            <img
-              src={post.imageUrl}
-              alt="Post attachment"
-              className={`w-full h-full object-cover max-h-[350px] transition duration-200 ${getFilterClass()}`}
-              referrerPolicy="no-referrer"
-            />
-            {isSnapchat && post.filterStyle && post.filterStyle !== "none" && (
-              <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-xs text-white text-[9px] py-1 px-2.5 rounded font-semibold font-sans tracking-wide">
-                🎨 Snapchat Lens: {post.filterStyle.toUpperCase()}
+          <div className="rounded-lg overflow-hidden border border-[#DBDBDB] bg-[#FAFAFA] max-h-[350px] relative group select-none">
+            {isSnapchat && isExpired ? (
+              <div className="w-full h-[220px] bg-zinc-950 flex flex-col items-center justify-center text-center p-6 relative overflow-hidden">
+                <img
+                  src={post.imageUrl}
+                  alt="Expired preview"
+                  className="absolute inset-0 w-full h-full object-cover blur-2xl opacity-15 pointer-events-none"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="relative z-10 flex flex-col items-center">
+                  <div className="w-11 h-11 rounded-full bg-yellow-400 text-black flex items-center justify-center font-bold text-lg mb-2 shadow-[0_0_15px_rgba(255,252,0,0.35)] animate-bounce">
+                    👻
+                  </div>
+                  <h4 className="text-white text-xs font-bold uppercase tracking-wider">Snap Disappeared</h4>
+                  <p className="text-zinc-400 text-[10px] mt-1 max-w-[260px] leading-relaxed font-semibold">
+                    This snapshot has self-destructed because its {post.expireHours || 24}-hour countdown elapsed!
+                  </p>
+                </div>
               </div>
+            ) : (
+              <>
+                <img
+                  src={post.imageUrl}
+                  alt="Post attachment"
+                  className={`w-full h-full object-cover max-h-[350px] transition duration-200 ${getFilterClass()}`}
+                  referrerPolicy="no-referrer"
+                />
+                {isSnapchat && post.filterStyle && post.filterStyle !== "none" && (
+                  <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-xs text-white text-[9px] py-1 px-2.5 rounded font-semibold font-sans tracking-wide">
+                    🎨 Snapchat Lens: {post.filterStyle.toUpperCase()}
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -206,10 +308,10 @@ export default function PostCard({
 
       {/* Post Action Buttons */}
       <div className="border-t border-b border-[#DBDBDB] px-4 py-2 bg-[#FAFAFA] flex items-center justify-between">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
           <button
             onClick={() => onLike(post.id)}
-            className={`flex items-center gap-2 py-1 px-2.5 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
+            className={`flex items-center gap-1.5 sm:gap-2 py-1 px-2.5 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
               isLiked
                 ? "text-red-500 bg-red-50/50"
                 : "text-gray-500 hover:text-red-500 hover:bg-red-50/50"
@@ -222,7 +324,7 @@ export default function PostCard({
 
           <button
             onClick={() => setShowComments(!showComments)}
-            className={`flex items-center gap-2 py-1 px-2.5 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
+            className={`flex items-center gap-1.5 sm:gap-2 py-1 px-2.5 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
               showComments
                 ? "text-[#262626] bg-[#FAFAFA] border border-[#DBDBDB]"
                 : "text-gray-500 hover:text-gray-800 hover:bg-[#FAFAFA]"
@@ -231,6 +333,20 @@ export default function PostCard({
           >
             <MessageCircle className="w-4 h-4" />
             <span>{post.comments.length} Comments</span>
+          </button>
+
+          <button
+            onClick={() => onBookmarkToggle(post.id)}
+            className={`flex items-center gap-1.5 sm:gap-2 py-1 px-2.5 rounded-md text-xs font-semibold cursor-pointer transition-colors ${
+              isBookmarked
+                ? "text-[#FF9500] bg-orange-50/50"
+                : "text-gray-500 hover:text-[#FF9500] hover:bg-orange-50/50"
+            }`}
+            id={`bookmark-btn-${post.id}`}
+            title={isBookmarked ? "Remove bookmark" : "Save this post"}
+          >
+            <Bookmark className={`w-4 h-4 ${isBookmarked ? "fill-[#FF9500] text-[#FF9500]" : ""}`} />
+            <span className="hidden xs:inline">{isBookmarked ? "Saved" : "Save"}</span>
           </button>
         </div>
 
@@ -278,7 +394,9 @@ export default function PostCard({
                         </button>
                         <span className="text-gray-400 text-[10px] font-medium">{formatDate(comment.createdAt)}</span>
                       </div>
-                      <p className="text-zinc-700 leading-relaxed break-words">{comment.content}</p>
+                      <p className="text-zinc-700 leading-relaxed break-words">
+                        {renderContentWithHashtags(comment.content)}
+                      </p>
                     </div>
                   </div>
                 );

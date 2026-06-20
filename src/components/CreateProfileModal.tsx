@@ -73,31 +73,57 @@ export default function CreateProfileModal({ onClose, onSubmit }: CreateProfileM
     }
   };
 
-  const selectGoogleAccount = (acc: typeof GOOGLE_ACCOUNTS[0]) => {
+  const selectGoogleAccount = async (acc: typeof GOOGLE_ACCOUNTS[0]) => {
+    setIsLoading(true);
+    setError("");
     const defaultUsername = acc.email.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "");
-    setUsername(defaultUsername);
-    setDisplayName(acc.displayName);
-    setAvatarUrl(acc.avatarUrl);
-    setGoogleEmail(acc.email);
-    setIsGoogleUser(true);
-    setBio(`Connected with Google Secure Account (${acc.email}). Excited to build on MiniSocial! 🤝✨`);
-    setShowGooglePopup(false);
+    try {
+      const resUser = await onSubmit({
+        username: defaultUsername,
+        displayName: acc.displayName,
+        bio: `Connected with Google Secure Account (${acc.email}). Excited to build on MiniSocial! 🤝✨`,
+        avatarUrl: acc.avatarUrl,
+        googleEmail: acc.email,
+        isGoogleUser: true
+      });
+      if (resUser) {
+        onClose();
+      }
+    } catch (err: any) {
+      setError(err?.message || "Google registration failed.");
+    } finally {
+      setIsLoading(false);
+      setShowGooglePopup(false);
+    }
   };
 
-  const handleCustomGoogleSubmit = (e: React.FormEvent) => {
+  const handleCustomGoogleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!customGoogleEmail.includes("@") || !customGoogleName.trim()) {
+      setError("Please supply a valid name and Google email.");
       return;
     }
+    setIsLoading(true);
+    setError("");
     const defaultUsername = customGoogleEmail.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "");
-    setUsername(defaultUsername);
-    setDisplayName(customGoogleName.trim());
-    const randomAvatar = `https://api.dicebear.com/7.x/pixel-art/svg?seed=${defaultUsername}`;
-    setAvatarUrl(randomAvatar);
-    setGoogleEmail(customGoogleEmail.trim().toLowerCase());
-    setIsGoogleUser(true);
-    setBio(`Securely connected with Google Account (${customGoogleEmail.trim()}). 💻📱`);
-    setShowGooglePopup(false);
+    try {
+      const resUser = await onSubmit({
+        username: defaultUsername,
+        displayName: customGoogleName.trim(),
+        bio: `Securely connected with Google Account (${customGoogleEmail.trim()}). 💻📱`,
+        avatarUrl: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${defaultUsername}`,
+        googleEmail: customGoogleEmail.trim().toLowerCase(),
+        isGoogleUser: true
+      });
+      if (resUser) {
+        onClose();
+      }
+    } catch (err: any) {
+      setError(err?.message || "Google registration failed.");
+    } finally {
+      setIsLoading(false);
+      setShowGooglePopup(false);
+    }
   };
 
   const unlinkGoogleAccount = () => {

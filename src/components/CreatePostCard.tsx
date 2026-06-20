@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Send, Image as ImageIcon, Sparkles, AlertCircle, Laptop, Clock, Filter } from "lucide-react";
 import { User, Post } from "../types";
 
@@ -39,6 +39,54 @@ export default function CreatePostCard({ currentUser, onPostCreated }: CreatePos
   const [postType, setPostType] = useState<"instagram" | "snapchat" | "telegram">("instagram");
   const [filterStyle, setFilterStyle] = useState("none");
   const [expireHours, setExpireHours] = useState(24);
+
+  // AI suggested hashtags system
+  const [suggestedTags, setSuggestedTags] = useState<string[]>([]);
+  const [isGeneratingTags, setIsGeneratingTags] = useState(false);
+  const [tagInfo, setTagInfo] = useState("");
+
+  useEffect(() => {
+    if (!content.trim() || content.trim().length < 5) {
+      setSuggestedTags([]);
+      setTagInfo("");
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsGeneratingTags(true);
+      try {
+        const res = await fetch("/api/posts/suggest-hashtags", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ content }),
+        });
+        const data = await res.json();
+        if (data.hashtags && Array.isArray(data.hashtags)) {
+          setSuggestedTags(data.hashtags);
+          setTagInfo(data.info || "");
+        }
+      } catch (err) {
+        console.error("Error fetching recommended tags:", err);
+      } finally {
+        setIsGeneratingTags(false);
+      }
+    }, 750); // 750ms typing debounce
+
+    return () => clearTimeout(timer);
+  }, [content]);
+
+  const handleAddHashtag = (tag: string) => {
+    if (content.toLowerCase().includes(tag.toLowerCase())) {
+      setSuggestedTags(prev => prev.filter(t => t !== tag));
+      return;
+    }
+    const trimmed = content.trim();
+    const separator = trimmed === "" ? "" : trimmed.endsWith("\n") || trimmed.endsWith(" ") ? "" : " ";
+    setContent(content + separator + tag + " ");
+    setSuggestedTags(prev => prev.filter(t => t !== tag));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,9 +197,48 @@ export default function CreatePostCard({ currentUser, onPostCreated }: CreatePos
               }
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              className="w-full text-sm py-2 bg-transparent border-0 focus:outline-none focus:ring-0 placeholder-gray-400 resize-none text-[#262626] leading-relaxed"
+              className="w-full text-sm py-1.5 bg-transparent border-0 focus:outline-none focus:ring-0 placeholder-gray-400 resize-none text-[#262626] leading-relaxed"
               id="post-content-textarea"
             />
+
+            {/* AI Hashtag Suggestion Tray */}
+            {(isGeneratingTags || suggestedTags.length > 0) && (
+              <div 
+                className="mt-2.5 pt-2 border-t border-dashed border-gray-100 flex flex-col gap-2 animate-in fade-in slide-in-from-top-1 duration-150" 
+                id="ai-hashtag-suggestions"
+              >
+                <div className="flex items-center justify-between text-[10px] pb-1 select-none">
+                  <span className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[#0095F6]">
+                    <Sparkles 
+                      className={`w-3.5 h-3.5 text-[#0095F6] ${isGeneratingTags ? "animate-spin" : ""}`} 
+                      style={{ animationDuration: isGeneratingTags ? "2s" : "0s" }} 
+                    />
+                    {isGeneratingTags ? "AI Analyzing Writing..." : "AI Recommended Tags"}
+                  </span>
+                  {tagInfo && (
+                    <span className="text-[10px] text-gray-400 font-medium normal-case">
+                      {tagInfo}
+                    </span>
+                  )}
+                </div>
+                {suggestedTags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {suggestedTags.map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => handleAddHashtag(tag)}
+                        className="text-[10px] font-bold text-[#0095F6] bg-sky-50 hover:bg-[#0095F6] hover:text-white border border-[#B3D9FF] hover:border-[#0095F6] px-2.5 py-1 rounded-md transition-all duration-150 cursor-pointer flex items-center gap-0.5 shadow-2xs hover:shadow-sm"
+                        id={`suggested-tag-btn-${tag.replace('#', '')}`}
+                        title={`Click to add ${tag} to your post`}
+                      >
+                        <span>+ {tag}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 

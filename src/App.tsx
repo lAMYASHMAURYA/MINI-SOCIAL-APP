@@ -17,7 +17,11 @@ import {
   User as UserIcon, 
   Eye, 
   Rss,
-  Activity
+  Activity,
+  Bell,
+  Bookmark,
+  TrendingUp,
+  X
 } from "lucide-react";
 
 import { User, Post, Story } from "./types";
@@ -30,6 +34,15 @@ import StoryBubbleTray from "./components/StoryBubbleTray";
 import StoryViewerModal from "./components/StoryViewerModal";
 import AddStoryModal from "./components/AddStoryModal";
 
+interface AlertNotification {
+  id: string;
+  type: "like" | "comment" | "follow" | "telegram";
+  userDisplayName: string;
+  userAvatarUrl: string;
+  time: string;
+  text: string;
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -38,12 +51,56 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Persistent Client-side bookmarks database
+  const [bookmarkedPostIds, setBookmarkedPostIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("mini_social_bookmarks");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("mini_social_bookmarks", JSON.stringify(bookmarkedPostIds));
+  }, [bookmarkedPostIds]);
+
+  // Collapsible Notification bells tray & counts
+  const [notifications, setNotifications] = useState<AlertNotification[]>([
+    {
+      id: "n1",
+      type: "follow",
+      userDisplayName: "Alice Chen",
+      userAvatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=250",
+      time: "2 mins ago",
+      text: "followed your hybrid channel"
+    },
+    {
+      id: "n2",
+      type: "like",
+      userDisplayName: "Marcus Vance",
+      userAvatarUrl: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&q=80&w=250",
+      time: "15 mins ago",
+      text: "liked your latest Sepia Snapchat lens post"
+    },
+    {
+      id: "n3",
+      type: "comment",
+      userDisplayName: "Alice Chen",
+      userAvatarUrl: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=250",
+      time: "1 hour ago",
+      text: "commented: 'Unbelievably beautiful layout, love this custom sandboxed system #design'"
+    }
+  ]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(3);
+
   // Modals & Navigation state
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [showCreateProfileModal, setShowCreateProfileModal] = useState(false);
   const [showAddStoryModal, setShowAddStoryModal] = useState(false);
   const [activeStoryUserId, setActiveStoryUserId] = useState<string | null>(null);
-  const [feedFilter, setFeedFilter] = useState<"all" | "following">("all");
+  const [feedFilter, setFeedFilter] = useState<"all" | "following" | "bookmarks">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
   // Mobile active sections: "feed", "network"
@@ -320,6 +377,63 @@ export default function App() {
     }
   };
 
+  const handleBookmarkToggle = (postId: string) => {
+    setBookmarkedPostIds(prev => 
+      prev.includes(postId) ? prev.filter(id => id !== postId) : [...prev, postId]
+    );
+  };
+
+  const handleHashtagClick = (tag: string) => {
+    setSearchQuery(tag);
+    setFeedFilter("all");
+    setMobileTab("feed");
+    setTimeout(() => {
+      const container = document.getElementById("posts-timeline-feed");
+      if (container) {
+        container.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 200);
+  };
+
+  const handleSimulateViralAlert = () => {
+    const alerts = [
+      { name: "Alice Chen", avatar: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=250", type: "like", text: "voted 👍 on your hybrid update" },
+      { name: "Marcus Vance", avatar: "https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&q=80&w=250", type: "comment", text: "replied: 'This is brilliant, let's explore more #tech'" },
+      { name: "Yash Maurya", avatar: "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=250", type: "telegram", text: "broadcasted a fresh reaction 🔥 to followers" },
+      { name: "Sarah Connor", avatar: "https://api.dicebear.com/7.x/pixel-art/svg?seed=Sarah", type: "follow", text: "joined variables directory and followed you back!" },
+    ];
+    const picked = alerts[Math.floor(Math.random() * alerts.length)];
+    const newNotif: AlertNotification = {
+      id: `live_${Date.now()}`,
+      type: picked.type as any,
+      userDisplayName: picked.name,
+      userAvatarUrl: picked.avatar,
+      time: "Just now",
+      text: picked.text
+    };
+    setNotifications(prev => [newNotif, ...prev]);
+    setUnreadCount(prev => prev + 1);
+  };
+
+  // Compute trending hashtags dynamically from all posts
+  const getTrendingHashtags = (): [string, number][] => {
+    const counts: Record<string, number> = {};
+    posts.forEach(post => {
+      const tags = post.content.match(/#\w+/g);
+      if (tags) {
+        tags.forEach(tag => {
+          const clean = tag.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
+          if (clean && clean.length > 1) {
+            counts[clean] = (counts[clean] || 0) + 1;
+          }
+        });
+      }
+    });
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5); // top 5 trending tags
+  };
+
   // Convert array to fast-lookup Record
   const usersMap: Record<string, User> = {};
   users.forEach(u => {
@@ -329,6 +443,7 @@ export default function App() {
   // Filter posts list dynamically
   const filteredPostsByAudience = posts.filter(post => {
     if (feedFilter === "all") return true;
+    if (feedFilter === "bookmarks") return bookmarkedPostIds.includes(post.id);
     if (!currentUser) return false;
     // Show self posts AND following users posts
     return post.authorId === currentUser.id || currentUser.following.includes(post.authorId);
@@ -378,9 +493,64 @@ export default function App() {
             <span className="hidden sm:inline">Reset Baseline</span>
           </button>
 
+          {/* Notifications Drawer Bell Dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                setShowNotifications(!showNotifications);
+                setUnreadCount(0); // clear count upon open
+              }}
+              className="relative p-2 rounded-lg border border-[#DBDBDB] hover:bg-gray-50 cursor-pointer transition text-gray-500 hover:text-gray-800"
+              id="notifications-bell-btn"
+              title="Recent activity logs"
+            >
+              <Bell className="w-4 h-4" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white font-sans text-[8px] font-extrabold w-4 h-4 rounded-full flex items-center justify-center animate-pulse shadow-sm">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+
+            {showNotifications && (
+              <div 
+                className="absolute right-0 mt-2.5 w-76 sm:w-80 bg-white border border-[#DBDBDB] rounded-xl shadow-lg z-50 overflow-hidden"
+                id="notifications-dropdown-menu"
+              >
+                <div className="p-3 bg-[#FAFAFA] border-b border-[#DBDBDB] flex items-center justify-between">
+                  <span className="text-xs font-extrabold text-gray-700 tracking-wide uppercase font-sans">Activity Broadcasts</span>
+                  <button onClick={() => setShowNotifications(false)} className="text-gray-400 hover:text-gray-600 text-xs cursor-pointer">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="max-h-[260px] overflow-y-auto divide-y divide-gray-100">
+                  {notifications.map((notif) => (
+                    <div key={notif.id} className="p-3 flex gap-2.5 items-start text-xs hover:bg-zinc-50 transition">
+                      <img src={notif.userAvatarUrl} className="w-7 h-7 rounded-full object-cover border border-gray-200 shrink-0" referrerPolicy="no-referrer" />
+                      <div className="flex-1 text-left min-w-0">
+                        <p className="text-[#262626] font-semibold break-words leading-tight">
+                          <span className="font-bold">{notif.userDisplayName}</span> {notif.text}
+                        </p>
+                        <span className="text-[9px] text-gray-400 font-medium block mt-1">{notif.time}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="p-2 bg-gray-50 border-t border-[#DBDBDB] text-center">
+                  <button 
+                    onClick={handleSimulateViralAlert}
+                    className="text-[10px] font-extrabold text-[#0095F6] hover:underline cursor-pointer"
+                  >
+                    ⚡ Simulate Live Event
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           <button
             onClick={() => setShowCreateProfileModal(true)}
-            className="flex items-center gap-1.5 text-xs text-white bg-zinc-90 w shadow-md hover:bg-zinc-800 px-4 py-2 rounded-lg font-bold cursor-pointer transition-all border border-zinc-900"
+            className="flex items-center gap-1.5 text-xs text-white bg-zinc-900 shadow-md hover:bg-zinc-800 px-4 py-2 rounded-lg font-bold cursor-pointer transition-all border border-zinc-900"
             id="create-profile-header-btn"
           >
             <Plus className="w-4 h-4" />
@@ -498,6 +668,16 @@ export default function App() {
                 );
               })}
             </div>
+
+            <button
+              onClick={handleSimulateViralAlert}
+              className="mt-4.5 w-full bg-zinc-950 text-white rounded-lg py-2.5 px-3 text-xs font-bold hover:bg-zinc-800 transition flex items-center justify-center gap-2 shadow-sm relative overflow-hidden group cursor-pointer"
+              id="simulate-traffic-btn"
+            >
+              <span className="absolute inset-0 w-full h-full bg-gradient-to-r from-yellow-300/10 to-red-400/10 opacity-0 group-hover:opacity-100 transition duration-200" />
+              <Activity className="w-3.5 h-3.5 text-yellow-300 animate-pulse" />
+              <span>Simulate Real-time Alerts ⚡️</span>
+            </button>
           </div>
         </section>
 
@@ -546,7 +726,7 @@ export default function App() {
             {/* Filter Timelines & Search */}
             <div className="bg-white border border-[#DBDBDB] rounded-xl p-4 flex flex-col md:flex-row gap-4 items-center justify-between shadow-xs">
               {/* Timeline feed filter links */}
-              <div className="flex bg-[#FAFAFA] border border-[#DBDBDB] p-1 rounded-xl w-full md:w-auto">
+              <div className="flex bg-[#FAFAFA] border border-[#DBDBDB] p-1 rounded-xl w-full md:w-auto flex-wrap">
                 <button
                   onClick={() => setFeedFilter("all")}
                   className={`flex-1 md:flex-initial flex items-center gap-1.5 py-2 px-3.5 rounded-lg text-xs font-semibold cursor-pointer transition ${
@@ -571,6 +751,18 @@ export default function App() {
                 >
                   <Rss className="w-3.5 h-3.5" />
                   <span>Following Feed</span>
+                </button>
+                <button
+                  onClick={() => setFeedFilter("bookmarks")}
+                  className={`flex-1 md:flex-initial flex items-center gap-1.5 py-2 px-3.5 rounded-lg text-xs font-semibold cursor-pointer transition ${
+                    feedFilter === "bookmarks"
+                      ? "bg-white text-[#262626] border border-[#DBDBDB] shadow-sm font-bold"
+                      : "text-gray-400 hover:text-gray-800"
+                  }`}
+                  id="feed-filter-bookmarks-btn"
+                >
+                  <Bookmark className={`w-3.5 h-3.5 ${feedFilter === "bookmarks" ? "fill-[#FF9500] text-[#FF9500]" : "text-gray-450"}`} />
+                  <span>Saved ({bookmarkedPostIds.length})</span>
                 </button>
               </div>
 
@@ -614,6 +806,9 @@ export default function App() {
                     onComment={handleCommentSubmit}
                     onUserClick={handleOpenUserProfile}
                     onReact={handleTelegramReact}
+                    isBookmarked={bookmarkedPostIds.includes(post.id)}
+                    onBookmarkToggle={handleBookmarkToggle}
+                    onHashtagClick={handleHashtagClick}
                   />
                 ))}
               </div>
@@ -623,6 +818,8 @@ export default function App() {
                 <p className="text-xs text-gray-400 mt-1.5 max-w-sm mx-auto font-medium leading-relaxed">
                   {feedFilter === "following" 
                     ? "Follow some participants in the directory or share updates to build your personal timeline feed."
+                    : feedFilter === "bookmarks"
+                    ? "Bookmark updates in the feeds to save them safely into your personal bookmarks tab!"
                     : "Be the first one to create a new thread!"}
                 </p>
                 {searchQuery && (
@@ -704,6 +901,38 @@ export default function App() {
                   <span>{u.displayName.split(" ")[0]}</span>
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* DYNAMIC TRENDS WIDGET */}
+          <div className="bg-white border border-[#DBDBDB] rounded-xl p-4.5 shadow-xs animate-fade-in">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-gray-400 mb-3 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <TrendingUp className="w-3.5 h-3.5 text-[#0095F6]" />
+                <span>Trending Hashtags</span>
+              </span>
+            </h3>
+            <div className="space-y-1">
+              {getTrendingHashtags().length > 0 ? (
+                getTrendingHashtags().map(([tag, count]) => (
+                  <button
+                    key={tag}
+                    onClick={() => handleHashtagClick(`#${tag}`)}
+                    className="w-full flex items-center justify-between text-left hover:bg-zinc-50 p-2 rounded-lg transition-all group cursor-pointer"
+                  >
+                    <span className="text-xs font-bold text-[#262626] group-hover:text-[#0095F6]">
+                      #{tag}
+                    </span>
+                    <span className="text-[10px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-extrabold font-mono">
+                      {count} {count === 1 ? "post" : "posts"}
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <p className="text-gray-400 italic text-[11px] text-center py-2 font-medium">
+                  Use #hashtags in updates to trigger updates!
+                </p>
+              )}
             </div>
           </div>
         </section>
